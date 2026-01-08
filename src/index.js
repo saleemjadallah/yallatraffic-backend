@@ -5,11 +5,18 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const logger = require('./utils/logger');
 
-// Route imports
+// Route imports - TomTom proxy
 const trafficRoutes = require('./routes/traffic');
 const routingRoutes = require('./routes/routing');
 const searchRoutes = require('./routes/search');
 const geocodingRoutes = require('./routes/geocoding');
+
+// Route imports - User features
+const usersRoutes = require('./routes/users');
+const tripsRoutes = require('./routes/trips');
+const incidentsRoutes = require('./routes/incidents');
+
+// Health check
 const healthRoutes = require('./routes/health');
 
 const app = express();
@@ -19,7 +26,7 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
@@ -46,25 +53,37 @@ app.use((req, res, next) => {
   next();
 });
 
-// API Routes
+// API Routes - TomTom proxy (public)
 app.use('/api/traffic', trafficRoutes);
 app.use('/api/routing', routingRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/geocoding', geocodingRoutes);
+
+// API Routes - User features (authenticated)
+app.use('/api/users', usersRoutes);
+app.use('/api/trips', tripsRoutes);
+app.use('/api/incidents', incidentsRoutes);
+
+// Health check
 app.use('/health', healthRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
     name: 'Yalla Backend API',
-    version: '1.0.0',
+    version: '1.1.0',
     status: 'running',
     endpoints: {
       health: '/health',
+      // TomTom proxy (public)
       traffic: '/api/traffic',
       routing: '/api/routing',
       search: '/api/search',
       geocoding: '/api/geocoding',
+      // User features (auth required)
+      users: '/api/users',
+      trips: '/api/trips',
+      incidents: '/api/incidents',
     },
   });
 });
@@ -87,5 +106,8 @@ app.listen(PORT, () => {
 
   if (!process.env.TOMTOM_API_KEY) {
     logger.warn('⚠️  TOMTOM_API_KEY not set - API calls will fail');
+  }
+  if (!process.env.DATABASE_URL) {
+    logger.warn('⚠️  DATABASE_URL not set - database features will fail');
   }
 });

@@ -1,0 +1,235 @@
+// Yalla Backend - Prisma Schema
+// https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER & AUTHENTICATION
+// ============================================
+
+model User {
+  id            String   @id @default(cuid())
+  firebaseUid   String   @unique
+  email         String?  @unique
+  displayName   String?
+  photoUrl      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  savedPlaces   SavedPlace[]
+  trips         Trip[]
+  incidents     Incident[]
+  preferences   UserPreferences?
+  pushTokens    PushToken[]
+
+  @@index([firebaseUid])
+}
+
+model UserPreferences {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Route preferences
+  avoidTolls            Boolean  @default(false)
+  avoidHighways         Boolean  @default(false)
+  preferredRouteType    String   @default("fastest") // fastest, shortest, eco
+
+  // Notification preferences
+  departureAlerts       Boolean  @default(true)
+  trafficAlerts         Boolean  @default(true)
+  incidentAlerts        Boolean  @default(true)
+  weeklyDigest          Boolean  @default(true)
+  alertMinutesBefore    Int      @default(30)
+
+  // Display preferences
+  distanceUnit          String   @default("km") // km, mi
+  timeFormat            String   @default("24h") // 12h, 24h
+  language              String   @default("en") // en, ar
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+// ============================================
+// SAVED PLACES
+// ============================================
+
+model SavedPlace {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name          String
+  address       String?
+  latitude      Float
+  longitude     Float
+  placeType     String   @default("other") // home, work, other
+  icon          String?  // emoji or icon name
+
+  // For frequent destinations tracking
+  visitCount    Int      @default(0)
+  lastVisited   DateTime?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, placeType])
+}
+
+// ============================================
+// TRIP HISTORY
+// ============================================
+
+model Trip {
+  id                  String   @id @default(cuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Origin
+  originName          String?
+  originAddress       String?
+  originLat           Float
+  originLng           Float
+
+  // Destination
+  destinationName     String?
+  destinationAddress  String?
+  destinationLat      Float
+  destinationLng      Float
+
+  // Trip details
+  departureTime       DateTime
+  arrivalTime         DateTime?
+  distanceMeters      Int
+  durationSeconds     Int
+  delaySeconds        Int      @default(0)
+
+  // Comparison with typical
+  typicalDuration     Int?     // seconds
+  timeSavedSeconds    Int?     // positive = saved time, negative = lost time
+
+  // Trip score (gamification)
+  tripScore           Int?     // 0-100
+
+  // Route info (stored as JSON for flexibility)
+  routePolyline       String?  // encoded polyline
+  trafficConditions   String?  // JSON: traffic breakdown
+
+  createdAt           DateTime @default(now())
+
+  @@index([userId])
+  @@index([userId, departureTime])
+  @@index([departureTime])
+}
+
+// ============================================
+// COMMUNITY INCIDENTS
+// ============================================
+
+model Incident {
+  id              String   @id @default(cuid())
+  reportedBy      String?
+  reporter        User?    @relation(fields: [reportedBy], references: [id], onDelete: SetNull)
+
+  // Location
+  latitude        Float
+  longitude       Float
+  roadName        String?
+
+  // Incident details
+  type            String   // accident, hazard, police, roadwork, congestion, other
+  severity        String   @default("moderate") // minor, moderate, major
+  description     String?
+
+  // Verification
+  confirmations   Int      @default(1)
+  denials         Int      @default(0)
+  isVerified      Boolean  @default(false)
+
+  // Timing
+  reportedAt      DateTime @default(now())
+  expiresAt       DateTime
+  resolvedAt      DateTime?
+  isActive        Boolean  @default(true)
+
+  // Votes tracking
+  votes           IncidentVote[]
+
+  @@index([latitude, longitude])
+  @@index([isActive, expiresAt])
+  @@index([type, isActive])
+}
+
+model IncidentVote {
+  id          String   @id @default(cuid())
+  incidentId  String
+  incident    Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+
+
+  voterIp     String?  // For anonymous votes (hashed)
+  voteType    String   // confirm, deny
+
+  createdAt   DateTime @default(now())
+
+  @@unique([incidentId, voterIp])
+  @@index([incidentId])
+}
+
+// ============================================
+// PUSH NOTIFICATIONS
+// ============================================
+
+model PushToken {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  token       String
+  platform    String   // ios, android
+  deviceId    String?
+
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, token])
+  @@index([userId, isActive])
+}
+
+// ============================================
+// SCHEDULED NOTIFICATIONS (for departure alerts)
+// ============================================
+
+model ScheduledAlert {
+  id              String   @id @default(cuid())
+  userId          String
+
+  // Trip info
+  destinationName String
+  destinationLat  Float
+  destinationLng  Float
+
+  // Schedule
+  scheduledFor    DateTime // When to send the alert
+  eventTime       DateTime // When the event/meeting starts
+
+  // Status
+  status          String   @default("pending") // pending, sent, cancelled
+  sentAt          DateTime?
+
+  createdAt       DateTime @default(now())
+
+  @@index([status, scheduledFor])
+  @@index([userId])
+}
