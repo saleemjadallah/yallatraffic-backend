@@ -11,17 +11,20 @@ datasource db {
 }
 
 // ============================================
-// USER & AUTHENTICATION
+// USER & AUTHENTICATION (Apple Sign In)
 // ============================================
 
 model User {
   id            String   @id @default(cuid())
-  firebaseUid   String   @unique
+  appleUserId   String   @unique  // Apple's unique user identifier
   email         String?  @unique
   displayName   String?
+  givenName     String?
+  familyName    String?
   photoUrl      String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  lastLoginAt   DateTime @default(now())
 
   // Relations
   savedPlaces   SavedPlace[]
@@ -29,8 +32,9 @@ model User {
   incidents     Incident[]
   preferences   UserPreferences?
   pushTokens    PushToken[]
+  vibes         Vibe[]
 
-  @@index([firebaseUid])
+  @@index([appleUserId])
 }
 
 model UserPreferences {
@@ -44,11 +48,12 @@ model UserPreferences {
   preferredRouteType    String   @default("fastest") // fastest, shortest, eco
 
   // Notification preferences
+  notificationsEnabled  Boolean  @default(true)
   departureAlerts       Boolean  @default(true)
   trafficAlerts         Boolean  @default(true)
   incidentAlerts        Boolean  @default(true)
   weeklyDigest          Boolean  @default(true)
-  alertMinutesBefore    Int      @default(30)
+  commuteReminderMinutes Int     @default(15)
 
   // Display preferences
   distanceUnit          String   @default("km") // km, mi
@@ -176,7 +181,6 @@ model IncidentVote {
   incident    Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
 
 
-
   voterIp     String?  // For anonymous votes (hashed)
   voteType    String   // confirm, deny
 
@@ -187,7 +191,81 @@ model IncidentVote {
 }
 
 // ============================================
-// PUSH NOTIFICATIONS
+// COMMUNITY VIBES
+// ============================================
+
+model Vibe {
+  id          String   @id @default(cuid())
+
+  // Anonymous user ID (no account needed)
+  anonymousId String
+
+  // Optionally linked to account
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Location
+  latitude    Float
+  longitude   Float
+  geohash     String   // For efficient geo queries
+  segmentId   String   // Road segment identifier
+
+  // Vibe type
+  type        String   // smooth, slowdown, heavy, deadlock, accident, police, hazard
+
+  // Timing
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime // Usually 7 minutes from creation
+
+  @@index([segmentId, expiresAt])
+  @@index([geohash])
+  @@index([anonymousId, createdAt])
+  @@index([expiresAt])
+}
+
+// Aggregated vibe clusters for efficient queries
+model VibeCluster {
+  id            String   @id @default(cuid())
+  segmentId     String   @unique
+
+  // Location (center of segment)
+  latitude      Float
+  longitude     Float
+  geohash       String
+
+  // Aggregated counts by type
+  smoothCount     Int    @default(0)
+  slowdownCount   Int    @default(0)
+  heavyCount      Int    @default(0)
+  deadlockCount   Int    @default(0)
+  accidentCount   Int    @default(0)
+  policeCount     Int    @default(0)
+  hazardCount     Int    @default(0)
+
+  totalCount      Int    @default(0)
+  dominantVibe    String @default("smooth")
+
+  lastUpdated   DateTime @default(now())
+  expiresAt     DateTime
+
+  @@index([geohash])
+  @@index([expiresAt])
+}
+
+// Rate limiting for vibe submissions
+model VibeRateLimit {
+  id            String   @id @default(cuid())
+  anonymousId   String   @unique
+
+  lastVibeAt    DateTime
+  vibeCount24h  Int      @default(1)
+  resetAt       DateTime // When 24h count resets
+
+  @@index([anonymousId])
+}
+
+// ============================================
+// PUSH NOTIFICATIONS (APNs)
 // ============================================
 
 model PushToken {
@@ -195,9 +273,10 @@ model PushToken {
   userId      String
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  token       String
-  platform    String   // ios, android
+  token       String   // APNs device token
+  platform    String   @default("ios") // ios only for now
   deviceId    String?
+  bundleId    String?  // App bundle ID
 
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())

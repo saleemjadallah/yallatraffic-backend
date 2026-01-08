@@ -11,10 +11,12 @@ const routingRoutes = require('./routes/routing');
 const searchRoutes = require('./routes/search');
 const geocodingRoutes = require('./routes/geocoding');
 
-// Route imports - User features
+// Route imports - Auth & User features
+const authRoutes = require('./routes/auth');
 const usersRoutes = require('./routes/users');
 const tripsRoutes = require('./routes/trips');
 const incidentsRoutes = require('./routes/incidents');
+const vibesRoutes = require('./routes/vibes');
 
 // Health check
 const healthRoutes = require('./routes/health');
@@ -59,10 +61,16 @@ app.use('/api/routing', routingRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/geocoding', geocodingRoutes);
 
+// API Routes - Auth (Apple Sign In)
+app.use('/api/auth', authRoutes);
+
 // API Routes - User features (authenticated)
 app.use('/api/users', usersRoutes);
 app.use('/api/trips', tripsRoutes);
 app.use('/api/incidents', incidentsRoutes);
+
+// API Routes - Community vibes (anonymous)
+app.use('/api/vibes', vibesRoutes);
 
 // Health check
 app.use('/health', healthRoutes);
@@ -71,8 +79,9 @@ app.use('/health', healthRoutes);
 app.get('/', (req, res) => {
   res.json({
     name: 'Yalla Backend API',
-    version: '1.1.0',
+    version: '2.0.0',
     status: 'running',
+    auth: 'Apple Sign In',
     endpoints: {
       health: '/health',
       // TomTom proxy (public)
@@ -80,10 +89,14 @@ app.get('/', (req, res) => {
       routing: '/api/routing',
       search: '/api/search',
       geocoding: '/api/geocoding',
+      // Auth (Apple Sign In)
+      auth: '/api/auth',
       // User features (auth required)
       users: '/api/users',
       trips: '/api/trips',
       incidents: '/api/incidents',
+      // Community vibes (anonymous)
+      vibes: '/api/vibes',
     },
   });
 });
