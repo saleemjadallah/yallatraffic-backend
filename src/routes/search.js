@@ -1,4 +1,5 @@
 const express = require('express');
+const googlePlaces = require('../utils/googlePlaces');
 const tomtom = require('../utils/tomtom');
 const { getOrFetch } = require('../utils/cache');
 const logger = require('../utils/logger');
@@ -7,47 +8,67 @@ const router = express.Router();
 
 /**
  * GET /api/search/places
- * Search for places by query
+ * Search for places by query using Google Places API
  * Query params:
  *   - query: Search text (required)
  *   - lat, lng: Bias results near this location (optional)
- *   - limit: Max results (default 50)
- *   - typeahead: Use typeahead mode for faster but less comprehensive results (default false)
+ *   - limit: Max results (default 20)
  */
 router.get('/places', async (req, res) => {
   try {
-    const { query, lat, lng, limit = 50, typeahead = 'false' } = req.query;
+    const { query, lat, lng, limit = 20 } = req.query;
 
     if (!query || query.length < 2) {
       return res.status(400).json({ error: 'Query must be at least 2 characters' });
     }
 
-    // Parse typeahead as boolean (query params are strings)
-    const useTypeahead = typeahead === 'true';
-
-    // Include location and typeahead in cache key if provided
-    const locationKey = lat && lng ? `${lat}:${lng}` : 'global';
-    const cacheKey = `search:${query.toLowerCase()}:${locationKey}:${limit}:${useTypeahead}`;
+    // Include location in cache key if provided
+    const locationKey = lat && lng ? `${parseFloat(lat).toFixed(3)}:${parseFloat(lng).toFixed(3)}` : 'global';
+    const cacheKey = `google:search:${query.toLowerCase()}:${locationKey}:${limit}`;
 
     const { data, cached } = await getOrFetch('search', cacheKey, async () => {
+      const places = await googlePlaces.searchPlaces(query, {
+        lat,
+        lng,
+        limit: Math.min(parseInt(limit), 20),
+        radius: 50000, // 50km radius for UAE coverage
+      });
+
+      // Transform to our standard format
+      const transformedPlaces = places.map(googlePlaces.transformPlace);
+
+      return { places: transformedPlaces };
+    });
+
+    res.json({
+      ...data,
+      _cached: cached,
+      _source: 'google',
+    });
+  } catch (error) {
+    logger.error('Google Places search error:', error.message);
+
+    // Fallback to TomTom if Google fails
+    try {
+      logger.info('Falling back to TomTom search');
+      const { query, lat, lng, limit = 20 } = req.query;
+
       const params = {
         query,
-        limit: Math.min(parseInt(limit), 100), // Allow up to 100 results for comprehensive search
+        limit: Math.min(parseInt(limit), 20),
         language: 'en-US',
-        typeahead: useTypeahead, // false = comprehensive results including smaller POIs
-        countrySet: 'AE', // Focus on UAE
+        typeahead: false,
+        countrySet: 'AE',
       };
 
-      // Bias results to location if provided
       if (lat && lng) {
         params.lat = lat;
         params.lon = lng;
-        params.radius = 50000; // 50km radius
+        params.radius = 50000;
       }
 
       const response = await tomtom.get('/search/2/search/.json', { params });
 
-      // Transform results to a cleaner format
       const places = response.data.results?.map((result) => ({
         id: result.id,
         name: result.poi?.name || result.address?.freeformAddress,
@@ -56,24 +77,20 @@ router.get('/places', async (req, res) => {
         category: result.poi?.categories?.[0] || 'address',
         distance: result.dist,
         type: result.type,
+        source: 'tomtom',
       }));
 
-      return { places };
-    });
-
-    res.json({
-      ...data,
-      _cached: cached,
-    });
-  } catch (error) {
-    logger.error('Search error:', error.message);
-    res.status(500).json({ error: error.message || 'Search failed' });
+      res.json({ places, _source: 'tomtom_fallback' });
+    } catch (fallbackError) {
+      logger.error('TomTom fallback also failed:', fallbackError.message);
+      res.status(500).json({ error: error.message || 'Search failed' });
+    }
   }
 });
 
 /**
  * GET /api/search/autocomplete
- * Fast autocomplete suggestions
+ * Fast autocomplete suggestions using Google Places API
  * Query params:
  *   - query: Partial search text (required)
  *   - lat, lng: Bias results near this location (optional)
@@ -86,10 +103,33 @@ router.get('/autocomplete', async (req, res) => {
       return res.status(400).json({ error: 'Query must be at least 2 characters' });
     }
 
-    const locationKey = lat && lng ? `${lat}:${lng}` : 'global';
-    const cacheKey = `autocomplete:${query.toLowerCase()}:${locationKey}`;
+    const locationKey = lat && lng ? `${parseFloat(lat).toFixed(3)}:${parseFloat(lng).toFixed(3)}` : 'global';
+    const cacheKey = `google:autocomplete:${query.toLowerCase()}:${locationKey}`;
 
     const { data, cached } = await getOrFetch('search', cacheKey, async () => {
+      const suggestions = await googlePlaces.autocomplete(query, { lat, lng });
+
+      // Transform and filter valid suggestions
+      const transformedSuggestions = suggestions
+        .map(googlePlaces.transformSuggestion)
+        .filter(Boolean);
+
+      return { suggestions: transformedSuggestions };
+    });
+
+    res.json({
+      ...data,
+      _cached: cached,
+      _source: 'google',
+    });
+  } catch (error) {
+    logger.error('Google autocomplete error:', error.message);
+
+    // Fallback to TomTom
+    try {
+      logger.info('Falling back to TomTom autocomplete');
+      const { query, lat, lng } = req.query;
+
       const params = {
         query,
         limit: 5,
@@ -109,7 +149,32 @@ router.get('/autocomplete', async (req, res) => {
         type: result.type,
       }));
 
-      return { suggestions };
+      res.json({ suggestions, _source: 'tomtom_fallback' });
+    } catch (fallbackError) {
+      logger.error('TomTom fallback also failed:', fallbackError.message);
+      res.status(500).json({ error: error.message || 'Autocomplete failed' });
+    }
+  }
+});
+
+/**
+ * GET /api/search/place/:placeId
+ * Get place details by Google Place ID
+ * Used when user selects an autocomplete suggestion
+ */
+router.get('/place/:placeId', async (req, res) => {
+  try {
+    const { placeId } = req.params;
+
+    if (!placeId) {
+      return res.status(400).json({ error: 'placeId is required' });
+    }
+
+    const cacheKey = `google:place:${placeId}`;
+
+    const { data, cached } = await getOrFetch('search', cacheKey, async () => {
+      const place = await googlePlaces.getPlaceDetails(placeId);
+      return { place: googlePlaces.transformPlace(place) };
     });
 
     res.json({
@@ -117,14 +182,15 @@ router.get('/autocomplete', async (req, res) => {
       _cached: cached,
     });
   } catch (error) {
-    logger.error('Autocomplete error:', error.message);
-    res.status(500).json({ error: error.message || 'Autocomplete failed' });
+    logger.error('Place details error:', error.message);
+    res.status(500).json({ error: error.message || 'Failed to get place details' });
   }
 });
 
 /**
  * GET /api/search/nearby
  * Find places near a location by category
+ * Still uses TomTom for category-based search (good for this use case)
  * Query params:
  *   - lat, lng: Center point (required)
  *   - category: Category ID or name (optional)
@@ -162,6 +228,7 @@ router.get('/nearby', async (req, res) => {
         position: result.position,
         category: result.poi?.categories?.[0],
         distance: result.dist,
+        source: 'tomtom',
       }));
 
       return { places };
@@ -170,6 +237,7 @@ router.get('/nearby', async (req, res) => {
     res.json({
       ...data,
       _cached: cached,
+      _source: 'tomtom',
     });
   } catch (error) {
     logger.error('Nearby search error:', error.message);
