@@ -11,26 +11,30 @@ const router = express.Router();
  * Query params:
  *   - query: Search text (required)
  *   - lat, lng: Bias results near this location (optional)
- *   - limit: Max results (default 10)
+ *   - limit: Max results (default 50)
+ *   - typeahead: Use typeahead mode for faster but less comprehensive results (default false)
  */
 router.get('/places', async (req, res) => {
   try {
-    const { query, lat, lng, limit = 10 } = req.query;
+    const { query, lat, lng, limit = 50, typeahead = 'false' } = req.query;
 
     if (!query || query.length < 2) {
       return res.status(400).json({ error: 'Query must be at least 2 characters' });
     }
 
-    // Include location in cache key if provided
+    // Parse typeahead as boolean (query params are strings)
+    const useTypeahead = typeahead === 'true';
+
+    // Include location and typeahead in cache key if provided
     const locationKey = lat && lng ? `${lat}:${lng}` : 'global';
-    const cacheKey = `search:${query.toLowerCase()}:${locationKey}:${limit}`;
+    const cacheKey = `search:${query.toLowerCase()}:${locationKey}:${limit}:${useTypeahead}`;
 
     const { data, cached } = await getOrFetch('search', cacheKey, async () => {
       const params = {
         query,
-        limit: Math.min(parseInt(limit), 20),
+        limit: Math.min(parseInt(limit), 100), // Allow up to 100 results for comprehensive search
         language: 'en-US',
-        typeahead: true,
+        typeahead: useTypeahead, // false = comprehensive results including smaller POIs
         countrySet: 'AE', // Focus on UAE
       };
 
