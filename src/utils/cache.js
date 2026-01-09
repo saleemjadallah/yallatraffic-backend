@@ -16,6 +16,9 @@ const caches = {
 
   // Geocoding - long TTL (1 hour)
   geocoding: new NodeCache({ stdTTL: 3600, checkperiod: 600 }),
+
+  // Road names - very long TTL (24 hours) since street names rarely change
+  roadNames: new NodeCache({ stdTTL: 86400, checkperiod: 3600 }),
 };
 
 /**
