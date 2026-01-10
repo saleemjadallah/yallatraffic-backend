@@ -11,6 +11,9 @@ const routingRoutes = require('./routes/routing');
 const searchRoutes = require('./routes/search');
 const geocodingRoutes = require('./routes/geocoding');
 
+// Route imports - AI Chat
+const chatRoutes = require('./routes/chat');
+
 // Route imports - Auth & User features
 const authRoutes = require('./routes/auth');
 const usersRoutes = require('./routes/users');
@@ -61,6 +64,9 @@ app.use('/api/routing', routingRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/geocoding', geocodingRoutes);
 
+// API Routes - AI Chat (Yalla assistant)
+app.use('/api/chat', chatRoutes);
+
 // API Routes - Auth (Apple Sign In)
 app.use('/api/auth', authRoutes);
 
@@ -89,6 +95,8 @@ app.get('/', (req, res) => {
       routing: '/api/routing',
       search: '/api/search',
       geocoding: '/api/geocoding',
+      // AI Chat assistant
+      chat: '/api/chat',
       // Auth (Apple Sign In)
       auth: '/api/auth',
       // User features (auth required)
@@ -122,5 +130,8 @@ app.listen(PORT, () => {
   }
   if (!process.env.DATABASE_URL) {
     logger.warn('⚠️  DATABASE_URL not set - database features will fail');
+  }
+  if (!process.env.GEMINI_API_KEY) {
+    logger.warn('⚠️  GEMINI_API_KEY not set - Yalla Chat will be unavailable');
   }
 });
