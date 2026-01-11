@@ -183,6 +183,43 @@ router.post('/signout', authenticateToken, async (req, res) => {
 });
 
 /**
+ * DELETE /api/auth/delete-account
+ * Permanently delete user account and all associated data
+ * Required by Apple App Store guidelines
+ */
+router.delete('/delete-account', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.userId;
+
+    // Log the deletion request for compliance
+    logger.info(`Account deletion requested for user: ${userId}`);
+
+    // Delete user - Prisma cascade will delete all related data:
+    // - SavedPlaces (cascade)
+    // - Trips (cascade)
+    // - UserPreferences (cascade)
+    // - PushTokens (cascade)
+    // - Incidents (set null on reporter)
+    // - Vibes (set null on reporter)
+    await prisma.user.delete({
+      where: { id: userId },
+    });
+
+    logger.info(`Account deleted successfully: ${userId}`);
+    res.json({ success: true, message: 'Account deleted successfully' });
+  } catch (error) {
+    logger.error('Delete account error:', error);
+
+    // Handle case where user doesn't exist
+    if (error.code === 'P2025') {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.status(500).json({ error: 'Failed to delete account' });
+  }
+});
+
+/**
  * POST /api/auth/push-token
  * Register APNs push token
  */
